@@ -45,9 +45,6 @@ def clean(lines: list[str]) -> str:
             out.append(line)
     return re.sub(r"\s+", " ", " ".join(out)).strip()
 
-if __name__ == "__main__":
-    for s in split_sections(Path("kb/landmark-developers-clean.md")):
-        print(f"id={s['id']:<3} {len(s['body']):>5} chars {s['heading']}")
 
 
 def ends_with_colon(line: str) -> bool:
@@ -100,3 +97,47 @@ def split_blocks(body: str):
     flush_prose()
     flush_table()
     return attach_notes(blocks)
+
+
+def table_texts(rows: list[str], label: str):
+    header = [c.strip() for c in rows[0].split("|").split("|")] 
+    data = []
+    for row in rows[1:]:
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        if len(cells) != len(header) or all(SEP_CELL.match(c) for c in cells):
+            continue
+        if cells == header:
+            continue
+        data.append(cells)
+    
+    prefix = clean(label) + " " if label else ""
+
+    if len(header) >= 3:
+        for cells in data:
+            pairs = [f"{h}: {c}" for h, c in zip(header, cells) if c and c != "-"]
+            yield prefix + "; ".join(" — ".join(c for c in cells if c) for cells in data)
+
+def make_chunks(sections: dict) -> list[dict]:
+    chunks = []
+    for kind, payload, label in split_blocks(section["body"]):
+        texts = table_texts(payload, label) if kind == "table" else [clean(payload)]
+        for text in texts:
+            if len(text) >= MIN_CHARS:
+                chunks.append({
+                    "section_id": section["id"],
+                    "content": f"{section['heading']}.{text}",
+                })
+    return chunks
+
+
+
+
+
+
+if __name__ == "__main__":
+   sections = split_sections(Path("kb/landmark-developers-clean.md"))
+   chunks = [c for s in sections for c in make_chunks(s)]
+   print(f"{len(sections)} sections -> {len(chunks)} chunks\n")
+   for c in chunks:
+    if c["section_id"] == 11:
+        print(f" {c['content'][:110]}")
