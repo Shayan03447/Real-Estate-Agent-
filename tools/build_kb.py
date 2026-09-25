@@ -1,6 +1,10 @@
 from pathlib import Path
 import re
-from pathlib import Path
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+
 
 SEP_CELL = re.compile(r":?-{2,}:?$")
 MIN_CHARS = 20
@@ -39,7 +43,7 @@ def split_sections(md_path: Path) -> list[dict]:
 def clean(lines: list[str]) -> str:
     out = []
     for line in lines:
-        lines = re.sub(r"\*\*|`", "", line)
+        line = re.sub(r"\*\*|`", "", line)
         line = re.sub(r"^[>#*-]+\s+", "", line.strip())
         if line:
             out.append(line)
@@ -80,7 +84,7 @@ def split_blocks(body: str):
         line= raw.strip()
 
         if line.startswith("|"):
-            if not table nad buf and ends_with_colon(buf[-1]):
+            if not table and buf and ends_with_colon(buf[-1]):
                 label = buf.pop()
             flush_prose()
             table.append(line)
@@ -100,7 +104,7 @@ def split_blocks(body: str):
 
 
 def table_texts(rows: list[str], label: str):
-    header = [c.strip() for c in rows[0].split("|").split("|")] 
+    header = [c.strip() for c in rows[0].strip("|").split("|")] 
     data = []
     for row in rows[1:]:
         cells = [c.strip() for c in row.strip("|").split("|")]
@@ -110,14 +114,16 @@ def table_texts(rows: list[str], label: str):
             continue
         data.append(cells)
     
-    prefix = clean(label) + " " if label else ""
+    prefix = clean([label]) + " " if label else ""
 
     if len(header) >= 3:
         for cells in data:
-            pairs = [f"{h}: {c}" for h, c in zip(header, cells) if c and c != "-"]
-            yield prefix + "; ".join(" — ".join(c for c in cells if c) for cells in data)
+            pairs = [f"{h}: {c}" for h, c in zip(header, cells) if c and c != "—"]
+            yield prefix + " · ".join(pairs)
+    else:
+        yield prefix + "; ".join(" — ".join(c for c in cells if c) for cells in data)
 
-def make_chunks(sections: dict) -> list[dict]:
+def make_chunks(section: dict) -> list[dict]:
     chunks = []
     for kind, payload, label in split_blocks(section["body"]):
         texts = table_texts(payload, label) if kind == "table" else [clean(payload)]
@@ -125,19 +131,36 @@ def make_chunks(sections: dict) -> list[dict]:
             if len(text) >= MIN_CHARS:
                 chunks.append({
                     "section_id": section["id"],
-                    "content": f"{section['heading']}.{text}",
+                    "content": f"{section['heading']}. {text}",
                 })
     return chunks
 
 
-
-
-
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    root=Path(__file__).resolve().parent.parent
+    load_dotenv(root / ".env")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY IS NOT FOUND")
+    client = OpenAI(api_key=api_key)
+    response = client.embeddings.create(
+        model = "text-embedding-3-small",
+        input = texts,
+    )
+    return [item.embedding for item in response.data]
+    
 
 if __name__ == "__main__":
    sections = split_sections(Path("kb/landmark-developers-clean.md"))
    chunks = [c for s in sections for c in make_chunks(s)]
-   print(f"{len(sections)} sections -> {len(chunks)} chunks\n")
-   for c in chunks:
-    if c["section_id"] == 11:
-        print(f" {c['content'][:110]}")
+   texts = [c["content"] for c in chunks]
+
+   print(f"{len(sections)} sections -> {len(chunks)} chunks")
+   print("embeddings are creating...")
+
+   vectors = embed_texts(texts)
+
+   print(f"vectors are created : {len(vectors)}")
+   print(f"first vector: {len(vectors[0])} numbers")
+   print(f"first 5 vectors : {vectors[0][:5]}")
+
